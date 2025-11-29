@@ -2,22 +2,23 @@ import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:appwrite/appwrite.dart';
-import 'package:appwrite/enums.dart'; // ✅ مهمة جداً لـ OAuth
+import 'package:appwrite/enums.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:csv/csv.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flip_card/flip_card.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // ✅ مكتبة Env
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/services.dart'; // ✅ زدنا هادي باش نسدو الكيبورد
 
-// ---------------------- إعدادات DATABASE ----------------------
+// ---------------------- CONSTANTS ----------------------
 const String SUBJECTS_COLLECTION = "subjects";
 const String THEMES_COLLECTION = "themes";
 const String CARDS_COLLECTION = "cards";
 const String TOKENS_COLLECTION = "tokens";
 
-// ---------------------- إعدادات FIREBASE ----------------------
+// ---------------------- FIREBASE ----------------------
 const firebaseOptions = FirebaseOptions(
   apiKey: "AIzaSyAwnX_OBLqMjyP4p6BsfLpb3fPWe7GwxgE",
   authDomain: "carida-c128a.firebaseapp.com",
@@ -27,7 +28,7 @@ const firebaseOptions = FirebaseOptions(
   appId: "1:265928952104:web:860a8e18068bf2f5f4a81d",
 );
 
-// ---------------------- COLORS & THEME ----------------------
+// ---------------------- THEME ----------------------
 const Color kBgColor = Color(0xFF0F172A);
 const Color kCardColor = Color(0xFF1E293B);
 const Color kPrimaryColor = Color(0xFF38BDF8);
@@ -35,10 +36,7 @@ const Color kAccentColor = Color(0xFFF472B6);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // ✅ تحميل ملف .env
   await dotenv.load(fileName: ".env");
-  
   await Firebase.initializeApp(options: firebaseOptions);
   runApp(const MyApp());
 }
@@ -71,7 +69,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// ---------------------- AUTH GATE ----------------------
+// ---------------------- AUTH GATE (الحارس الذكي) ----------------------
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
   @override
@@ -87,7 +85,6 @@ class _AuthGateState extends State<AuthGate> {
   @override
   void initState() {
     super.initState();
-    // ✅ القراءة من Env
     client
         .setEndpoint(dotenv.env['APPWRITE_ENDPOINT']!)
         .setProject(dotenv.env['APPWRITE_PROJECT_ID']!)
@@ -99,22 +96,33 @@ class _AuthGateState extends State<AuthGate> {
   void _checkSession() async {
     try {
       await account.get();
-      setState(() { isLoggedIn = true; isLoading = false; });
+      if (mounted) setState(() { isLoggedIn = true; isLoading = false; });
     } catch (e) {
-      setState(() { isLoggedIn = false; isLoading = false; });
+      if (mounted) setState(() { isLoggedIn = false; isLoading = false; });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     if (isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator(color: kPrimaryColor)));
-    return isLoggedIn ? const DashboardScreen() : const AuthScreen();
+    
+    // ✅ هنا الإصلاح: كنبدلو الصفحة بناء على الحالة، ماشي بالنافيغاتور
+    if (isLoggedIn) {
+      return DashboardScreen(onLogout: () {
+        setState(() => isLoggedIn = false);
+      });
+    } else {
+      return AuthScreen(onLoginSuccess: () {
+        setState(() => isLoggedIn = true);
+      });
+    }
   }
 }
 
-// ---------------------- AUTH SCREEN ----------------------
+// ---------------------- AUTH SCREEN (Login/Signup) ----------------------
 class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key});
+  final VoidCallback onLoginSuccess; // ✅ Callback جديد
+  const AuthScreen({super.key, required this.onLoginSuccess});
   @override
   State<AuthScreen> createState() => _AuthScreenState();
 }
@@ -132,7 +140,6 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   void initState() {
     super.initState();
-    // ✅ القراءة من Env
     client
         .setEndpoint(dotenv.env['APPWRITE_ENDPOINT']!)
         .setProject(dotenv.env['APPWRITE_PROJECT_ID']!)
@@ -141,6 +148,9 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   void _authenticate() async {
+    // ✅ سد الكيبورد باش مايخلقش مشكل
+    FocusManager.instance.primaryFocus?.unfocus();
+    
     setState(() => isLoading = true);
     try {
       if (isLogin) {
@@ -149,17 +159,16 @@ class _AuthScreenState extends State<AuthScreen> {
         await account.create(userId: ID.unique(), email: _emailController.text, password: _passwordController.text, name: _nameController.text);
         await account.createEmailPasswordSession(email: _emailController.text, password: _passwordController.text);
       }
-      if (mounted) {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const DashboardScreen()));
-      }
+      
+      // ✅ استدعاء النجاح (AuthGate هو اللي غيبدل الصفحة)
+      widget.onLoginSuccess();
+      
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.redAccent));
       }
     } finally {
-      if (mounted) {
-        setState(() => isLoading = false);
-      }
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
@@ -179,6 +188,7 @@ class _AuthScreenState extends State<AuthScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
+        height: double.infinity, // يشد الشاشة كاملة
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -209,8 +219,7 @@ class _AuthScreenState extends State<AuthScreen> {
                       Text(isLogin ? "Welcome Back" : "Start Learning", style: const TextStyle(color: Colors.white70)),
                       const SizedBox(height: 32),
                       
-                      if (!isLogin)
-                        _buildTextField(_nameController, "Full Name", Icons.person),
+                      if (!isLogin) _buildTextField(_nameController, "Full Name", Icons.person),
                       if (!isLogin) const SizedBox(height: 16),
                       
                       _buildTextField(_emailController, "Email", Icons.email),
@@ -285,7 +294,8 @@ class _AuthScreenState extends State<AuthScreen> {
 
 // ---------------------- DASHBOARD ----------------------
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  final VoidCallback onLogout; // ✅ Callback للخروج
+  const DashboardScreen({super.key, required this.onLogout});
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
@@ -300,7 +310,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    // ✅ القراءة من Env
     client
         .setEndpoint(dotenv.env['APPWRITE_ENDPOINT']!)
         .setProject(dotenv.env['APPWRITE_PROJECT_ID']!)
@@ -311,9 +320,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _getUser() async {
-    var user = await account.get();
-    setState(() => userId = user.$id);
-    _checkPermissionStatus();
+    try {
+      var user = await account.get();
+      if(mounted) setState(() => userId = user.$id);
+      _checkPermissionStatus();
+    } catch(e) {
+      print("Error getting user: $e");
+    }
   }
 
   String _getEmojiForSubject(String name) {
@@ -344,7 +357,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (controller.text.isNotEmpty && userId != null) {
             String emoji = _getEmojiForSubject(controller.text);
             await databases.createDocument(
-              databaseId: dotenv.env['DATABASE_ID']!, // ✅ Env
+              databaseId: dotenv.env['DATABASE_ID']!,
               collectionId: SUBJECTS_COLLECTION,
               documentId: ID.unique(),
               data: {
@@ -354,8 +367,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 'createdAt': DateTime.now().toUtc().toIso8601String(),
               }
             );
-            setState(() {});
-            Navigator.pop(context);
+            if(mounted) {
+              setState(() {});
+              Navigator.pop(context);
+            }
           }
         },
       ),
@@ -364,16 +379,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _logout(BuildContext context) async {
     await account.deleteSession(sessionId: 'current');
-    if (context.mounted) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthScreen()));
-    }
+    widget.onLogout(); // ✅ نعلمو AuthGate تبدل الشاشة
   }
 
   void _checkPermissionStatus() async {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
     NotificationSettings settings = await messaging.getNotificationSettings();
     if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-      setState(() => notificationsEnabled = true);
+      if(mounted) setState(() => notificationsEnabled = true);
       _getToken();
     }
   }
@@ -381,12 +394,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
     NotificationSettings settings = await messaging.requestPermission(alert: true, badge: true, sound: true);
     if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-      setState(() => notificationsEnabled = true);
+      if(mounted) setState(() => notificationsEnabled = true);
       _getToken();
     }
   }
   void _getToken() async {
-    // ✅ القراءة من Env
     String? token = await FirebaseMessaging.instance.getToken(vapidKey: dotenv.env['VAPID_KEY']);
     if (token != null && userId != null) {
        try {
@@ -418,7 +430,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ? const Center(child: CircularProgressIndicator()) 
         : FutureBuilder(
             future: databases.listDocuments(
-              databaseId: dotenv.env['DATABASE_ID']!, // ✅ Env
+              databaseId: dotenv.env['DATABASE_ID']!,
               collectionId: SUBJECTS_COLLECTION,
               queries: [Query.equal('userId', userId!)],
             ),
@@ -466,7 +478,6 @@ class _ThemesScreenState extends State<ThemesScreen> {
   @override
   void initState() {
     super.initState();
-    // ✅ القراءة من Env
     client
         .setEndpoint(dotenv.env['APPWRITE_ENDPOINT']!)
         .setProject(dotenv.env['APPWRITE_PROJECT_ID']!)
@@ -477,7 +488,7 @@ class _ThemesScreenState extends State<ThemesScreen> {
   }
    void _getUser() async {
     var user = await account.get();
-    setState(() => userId = user.$id);
+    if(mounted) setState(() => userId = user.$id);
   }
 
   void _addTheme() {
@@ -491,7 +502,7 @@ class _ThemesScreenState extends State<ThemesScreen> {
         onConfirm: () async {
           if (controller.text.isNotEmpty && userId != null) {
             await databases.createDocument(
-              databaseId: dotenv.env['DATABASE_ID']!, // ✅ Env
+              databaseId: dotenv.env['DATABASE_ID']!,
               collectionId: THEMES_COLLECTION,
               documentId: ID.unique(),
               data: {
@@ -501,8 +512,10 @@ class _ThemesScreenState extends State<ThemesScreen> {
                 'createdAt': DateTime.now().toUtc().toIso8601String(),
               }
             );
-            setState(() {});
-            Navigator.pop(context);
+            if(mounted) {
+              setState(() {});
+              Navigator.pop(context);
+            }
           }
         },
       ),
@@ -520,7 +533,7 @@ class _ThemesScreenState extends State<ThemesScreen> {
       ),
       body: userId == null ? const Center(child: CircularProgressIndicator()) : FutureBuilder(
         future: databases.listDocuments(
-          databaseId: dotenv.env['DATABASE_ID']!, // ✅ Env
+          databaseId: dotenv.env['DATABASE_ID']!,
           collectionId: THEMES_COLLECTION,
           queries: [Query.equal('subjectId', widget.subjectId)],
         ),
@@ -572,7 +585,6 @@ class _CardsScreenState extends State<CardsScreen> {
   @override
   void initState() {
     super.initState();
-    // ✅ القراءة من Env
     client
         .setEndpoint(dotenv.env['APPWRITE_ENDPOINT']!)
         .setProject(dotenv.env['APPWRITE_PROJECT_ID']!)
@@ -584,8 +596,10 @@ class _CardsScreenState extends State<CardsScreen> {
   
   void _getUser() async {
     var user = await account.get();
-    setState(() => userId = user.$id);
-    _fetchCards();
+    if(mounted) {
+      setState(() => userId = user.$id);
+      _fetchCards();
+    }
   }
 
   Future<void> _uploadCSV() async {
@@ -603,7 +617,7 @@ class _CardsScreenState extends State<CardsScreen> {
         for (var row in rows) {
           if (row.length >= 2) {
             await databases.createDocument(
-              databaseId: dotenv.env['DATABASE_ID']!, // ✅ Env
+              databaseId: dotenv.env['DATABASE_ID']!,
               collectionId: CARDS_COLLECTION,
               documentId: ID.unique(),
               data: {
@@ -616,9 +630,11 @@ class _CardsScreenState extends State<CardsScreen> {
             );
           }
         }
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Cards Imported!')));
-        _fetchCards();
-      } catch (e) { print(e); } finally { setState(() => isUploading = false); }
+        if(mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Cards Imported!')));
+          _fetchCards();
+        }
+      } catch (e) { print(e); } finally { if(mounted) setState(() => isUploading = false); }
     }
   }
 
@@ -626,11 +642,11 @@ class _CardsScreenState extends State<CardsScreen> {
     if (userId == null) return;
     try {
       var result = await databases.listDocuments(
-        databaseId: dotenv.env['DATABASE_ID']!, // ✅ Env
+        databaseId: dotenv.env['DATABASE_ID']!,
         collectionId: CARDS_COLLECTION,
         queries: [Query.equal('themeId', widget.themeId), Query.orderDesc('createdAt')],
       );
-      setState(() { myCards = result.documents.map((doc) => doc.data).toList(); });
+      if(mounted) setState(() { myCards = result.documents.map((doc) => doc.data).toList(); });
     } catch (e) { print(e); }
   }
 
