@@ -18,11 +18,8 @@ const Color kAccentColor = Color(0xFFF472B6);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // 1. تحميل المتغيرات البيئية
   await dotenv.load(fileName: ".env");
   
-  // 2. إعداد Firebase بالقيم من .env
   await Firebase.initializeApp(
     options: FirebaseOptions(
       apiKey: dotenv.env['FIREBASE_API_KEY']!,
@@ -60,7 +57,6 @@ class MyApp extends StatelessWidget {
           centerTitle: true,
         ),
       ),
-      // الدخول المباشر (Guest Mode)
       home: const DashboardScreen(),
     );
   }
@@ -82,7 +78,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool notificationsEnabled = false;
   bool isLoading = true;
 
-  // جلب القيم من Env لتسهيل الاستخدام
   final String dbId = dotenv.env['DATABASE_ID']!;
   final String colSubjects = dotenv.env['SUBJECTS_COLLECTION']!;
   final String colTokens = dotenv.env['TOKENS_COLLECTION']!;
@@ -101,7 +96,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     databases = Databases(client);
     account = Account(client);
 
-    // تسجيل الدخول التلقائي (Anonymous)
     try {
       var user = await account.get();
       if (mounted) setState(() => userId = user.$id);
@@ -348,6 +342,10 @@ class _CardsScreenState extends State<CardsScreen> {
   List<Map<String, dynamic>> myCards = [];
   final String dbId = dotenv.env['DATABASE_ID']!;
   final String colCards = dotenv.env['CARDS_COLLECTION']!;
+  // تأكد من أنك ضفت QUEUE_COLLECTION في ملف .env
+  // final String colQueue = dotenv.env['QUEUE_COLLECTION']!; 
+  // سأستخدم String مباشر للمثال، لكن الأفضل وضعه في .env
+  final String colQueue = 'notifications_queue'; 
 
   @override
   void initState() {
@@ -366,6 +364,62 @@ class _CardsScreenState extends State<CardsScreen> {
     }
   }
 
+  // ============== دالة جدولة الإشعارات (Queue System) ==============
+  Future<void> _scheduleNotifications(String userId) async {
+    // 1. جلب التوكن الخاص بالمستخدم
+    String? fcmToken;
+    try {
+      final tokenDocs = await databases.listDocuments(
+        databaseId: dbId,
+        collectionId: dotenv.env['TOKENS_COLLECTION']!,
+        queries: [Query.equal('userId', userId)],
+      );
+      if (tokenDocs.documents.isNotEmpty) {
+        fcmToken = tokenDocs.documents.first.data['fcmToken'];
+      }
+    } catch (e) {
+      print("Error fetching token: $e");
+    }
+
+    if (fcmToken == null) return; 
+
+    final now = DateTime.now().toUtc();
+    
+    // 2. الفترات الزمنية (مع إضافة 30 يوماً)
+    final intervals = [
+      {'label': '1 ساعة', 'duration': const Duration(hours: 1)},
+      {'label': '3 ساعات', 'duration': const Duration(hours: 3)},
+      {'label': 'يوم واحد', 'duration': const Duration(days: 1)},
+      {'label': '3 أيام', 'duration': const Duration(days: 3)},
+      {'label': 'أسبوع', 'duration': const Duration(days: 7)},
+      {'label': '15 يوم', 'duration': const Duration(days: 15)},
+      {'label': '30 يوم', 'duration': const Duration(days: 30)}, // تمت الإضافة ✅
+    ];
+
+    // 3. إنشاء المهام في الطابور
+    for (var interval in intervals) {
+      final scheduledTime = now.add(interval['duration'] as Duration);
+      try {
+        await databases.createDocument(
+          databaseId: dbId,
+          collectionId: colQueue, // تأكد أن ID صحيح
+          documentId: ID.unique(),
+          data: {
+            'userId': userId,
+            'fcmToken': fcmToken,
+            'title': 'Cardia Reminder 🧠',
+            'body': 'حان وقت مراجعة البطاقات (${interval['label']})!',
+            'scheduledAt': scheduledTime.toIso8601String(),
+          }
+        );
+      } catch (e) {
+        print("Error scheduling ${interval['label']}: $e");
+      }
+    }
+    print("✅ Notifications scheduled successfully.");
+  }
+  // ==============================================================
+
   Future<void> _uploadCSV() async {
     if (userId == null) return;
     FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['csv'], withData: true);
@@ -376,6 +430,9 @@ class _CardsScreenState extends State<CardsScreen> {
         final csvString = utf8.decode(bytes!);
         List<List<dynamic>> rows = const CsvToListConverter().convert(csvString);
         String batchId = DateTime.now().millisecondsSinceEpoch.toString();
+        
+        bool hasImported = false;
+        
         for (var row in rows) {
           if (row.length >= 2) {
             await databases.createDocument(
@@ -391,10 +448,16 @@ class _CardsScreenState extends State<CardsScreen> {
                 'themeId': widget.themeId
               },
             );
+            hasImported = true;
           }
         }
-        if (mounted) {
+        
+        if (mounted && hasImported) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Cards Imported!')));
+          
+          // تشغيل دالة الجدولة فوراً بعد الرفع
+          _scheduleNotifications(userId!);
+          
           _fetchCards();
         }
       } catch (e) {
