@@ -8,7 +8,6 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flip_card/flip_card.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 // ---------------------- THEME ----------------------
 const Color kBgColor = Color(0xFF0F172A);
@@ -18,16 +17,16 @@ const Color kAccentColor = Color(0xFFF472B6);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: ".env");
   
+  // 1. إعداد Firebase بالقيم المباشرة (Hardcoded)
   await Firebase.initializeApp(
-    options: FirebaseOptions(
-      apiKey: dotenv.env['FIREBASE_API_KEY']!,
-      authDomain: dotenv.env['FIREBASE_AUTH_DOMAIN']!,
-      projectId: dotenv.env['FIREBASE_PROJECT_ID']!,
-      storageBucket: dotenv.env['FIREBASE_STORAGE_BUCKET']!,
-      messagingSenderId: dotenv.env['FIREBASE_SENDER_ID']!,
-      appId: dotenv.env['FIREBASE_APP_ID']!,
+    options: const FirebaseOptions(
+      apiKey: 'AIzaSyAwnX_OBLqMjyP4p6BsfLpb3fPWe7GwxgE',
+      authDomain: 'carida-c128a.firebaseapp.com',
+      projectId: 'carida-c128a',
+      storageBucket: 'carida-c128a.firebasestorage.app',
+      messagingSenderId: '265928952104',
+      appId: '1:265928952104:web:860a8e18068bf2f5f4a81d',
     ),
   );
   
@@ -78,9 +77,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool notificationsEnabled = false;
   bool isLoading = true;
 
-  final String dbId = dotenv.env['DATABASE_ID']!;
-  final String colSubjects = dotenv.env['SUBJECTS_COLLECTION']!;
-  final String colTokens = dotenv.env['TOKENS_COLLECTION']!;
+  // 2. المتغيرات مباشرة (Hardcoded) من ملف env ديالك
+  final String dbId = '692a1676000ec2efe6b7';
+  final String colSubjects = 'subjects';
+  final String colTokens = 'tokens';
+  
+  // VAPID KEY للإشعارات
+  final String vapidKey = 'BJuMHF6db0WaWrrR_Cd3cwJHfEgdTLjX1oQHdN6fgG_Nn-vQ-VbZonixH2lmm8Q9n8OiFsobzNIv2u0ioRc70bQ';
 
   @override
   void initState() {
@@ -89,10 +92,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _initAppwrite() async {
+    // إعداد Appwrite بالقيم المباشرة
     client = Client()
-        .setEndpoint(dotenv.env['APPWRITE_ENDPOINT']!)
-        .setProject(dotenv.env['APPWRITE_PROJECT_ID']!)
+        .setEndpoint('https://fra.cloud.appwrite.io/v1') // انتبه: الرابط ديالك فيه fra (Frankfurt)
+        .setProject('692a1631002d05865c41')
         .setSelfSigned(status: true);
+        
     databases = Databases(client);
     account = Account(client);
 
@@ -173,12 +178,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _getToken() async {
-    String? token = await FirebaseMessaging.instance.getToken(vapidKey: dotenv.env['VAPID_KEY']);
+    // استعمال VAPID KEY المباشر
+    String? token = await FirebaseMessaging.instance.getToken(vapidKey: vapidKey);
+    
     if (token != null && userId != null) {
        try {
-        var result = await databases.listDocuments(databaseId: dbId, collectionId: colTokens, queries: [Query.equal('userId', userId!)]);
+        var result = await databases.listDocuments(
+            databaseId: dbId, 
+            collectionId: colTokens, 
+            queries: [Query.equal('userId', userId!)]
+        );
+        
         if (result.total == 0) {
-          await databases.createDocument(databaseId: dbId, collectionId: colTokens, documentId: ID.unique(), data: {'userId': userId, 'fcmToken': token});
+          await databases.createDocument(
+              databaseId: dbId, 
+              collectionId: colTokens, 
+              documentId: ID.unique(), 
+              data: {'userId': userId, 'fcmToken': token}
+          );
+        } else {
+            // تحديث التوكن إذا كان موجوداً ولكن مختلفاً (احتياط)
+            if (result.documents.first.data['fcmToken'] != token) {
+                await databases.updateDocument(
+                    databaseId: dbId,
+                    collectionId: colTokens,
+                    documentId: result.documents.first.$id,
+                    data: {'fcmToken': token}
+                );
+            }
         }
        } catch(e) { print(e); }
     }
@@ -233,13 +260,15 @@ class _ThemesScreenState extends State<ThemesScreen> {
   late Databases databases;
   late Account account;
   String? userId;
-  final String dbId = dotenv.env['DATABASE_ID']!;
-  final String colThemes = dotenv.env['THEMES_COLLECTION']!;
+  
+  // قيم Hardcoded
+  final String dbId = '692a1676000ec2efe6b7';
+  final String colThemes = 'themes';
 
   @override
   void initState() {
     super.initState();
-    client.setEndpoint(dotenv.env['APPWRITE_ENDPOINT']!).setProject(dotenv.env['APPWRITE_PROJECT_ID']!).setSelfSigned(status: true);
+    client.setEndpoint('https://fra.cloud.appwrite.io/v1').setProject('692a1631002d05865c41').setSelfSigned(status: true);
     databases = Databases(client);
     account = Account(client);
     _getUser();
@@ -340,17 +369,18 @@ class _CardsScreenState extends State<CardsScreen> {
   String? userId;
   bool isUploading = false;
   List<Map<String, dynamic>> myCards = [];
-  final String dbId = dotenv.env['DATABASE_ID']!;
-  final String colCards = dotenv.env['CARDS_COLLECTION']!;
-  // تأكد من أنك ضفت QUEUE_COLLECTION في ملف .env
-  // final String colQueue = dotenv.env['QUEUE_COLLECTION']!; 
-  // سأستخدم String مباشر للمثال، لكن الأفضل وضعه في .env
+  
+  // قيم Hardcoded
+  final String dbId = '692a1676000ec2efe6b7';
+  final String colCards = 'cards';
+  final String colTokens = 'tokens';
+  // هذا هو ID ديال notifications_queue اللي أكدتي عليه في الصورة
   final String colQueue = 'notifications_queue'; 
 
   @override
   void initState() {
     super.initState();
-    client.setEndpoint(dotenv.env['APPWRITE_ENDPOINT']!).setProject(dotenv.env['APPWRITE_PROJECT_ID']!).setSelfSigned(status: true);
+    client.setEndpoint('https://fra.cloud.appwrite.io/v1').setProject('692a1631002d05865c41').setSelfSigned(status: true);
     databases = Databases(client);
     account = Account(client);
     _getUser();
@@ -368,17 +398,29 @@ class _CardsScreenState extends State<CardsScreen> {
   Future<void> _scheduleNotifications(String userId) async {
     String? fcmToken;
     try {
-      // 1. جلب التوكن
+      // 1. جلب التوكن (باستعمال المتغير المباشر)
       final tokenDocs = await databases.listDocuments(
         databaseId: dbId,
-        collectionId: dotenv.env['TOKENS_COLLECTION']!,
+        collectionId: colTokens,
         queries: [Query.equal('userId', userId)],
       );
 
       if (tokenDocs.documents.isNotEmpty) {
         fcmToken = tokenDocs.documents.first.data['fcmToken'];
+        // تنبيه صغير للتأكد أن التوكن كايني
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('✅ User Token Found - Scheduling...'),
+            duration: Duration(seconds: 2),
+            backgroundColor: Colors.green,
+        ));
       } else {
+        // تنبيه إذا لم يتم العثور على التوكن
         print("❌ Warning: No FCM token found for user $userId");
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('⚠️ Notification Token Missing! Tap the bell icon.'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 4),
+        ));
         return;
       }
     } catch (e) {
@@ -405,7 +447,7 @@ class _CardsScreenState extends State<CardsScreen> {
       try {
         await databases.createDocument(
           databaseId: dbId,
-          collectionId: colQueue, // تأكد أن هذا المتغير فيه ID الصحيح: 674...
+          collectionId: colQueue, // notifications_queue
           documentId: ID.unique(),
           data: {
             'userId': userId,
@@ -420,7 +462,10 @@ class _CardsScreenState extends State<CardsScreen> {
         print("Error scheduling ${interval['label']}: $e");
       }
     }
-    print("✅ تم جدولة $successCount إشعارات بنجاح في الطابور.");
+    
+    if (successCount > 0) {
+        print("✅ تم جدولة $successCount إشعارات بنجاح في الطابور.");
+    }
   }
   // ==============================================================
 
