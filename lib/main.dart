@@ -366,26 +366,28 @@ class _CardsScreenState extends State<CardsScreen> {
 
   // ============== دالة جدولة الإشعارات (Queue System) ==============
   Future<void> _scheduleNotifications(String userId) async {
-    // 1. جلب التوكن الخاص بالمستخدم
     String? fcmToken;
     try {
+      // 1. جلب التوكن
       final tokenDocs = await databases.listDocuments(
         databaseId: dbId,
         collectionId: dotenv.env['TOKENS_COLLECTION']!,
         queries: [Query.equal('userId', userId)],
       );
+
       if (tokenDocs.documents.isNotEmpty) {
         fcmToken = tokenDocs.documents.first.data['fcmToken'];
+      } else {
+        print("❌ Warning: No FCM token found for user $userId");
+        return;
       }
     } catch (e) {
       print("Error fetching token: $e");
+      return;
     }
 
-    if (fcmToken == null) return; 
-
+    // 2. الفترات الزمنية الكاملة
     final now = DateTime.now().toUtc();
-    
-    // 2. الفترات الزمنية (مع إضافة 30 يوماً)
     final intervals = [
       {'label': '1 ساعة', 'duration': const Duration(hours: 1)},
       {'label': '3 ساعات', 'duration': const Duration(hours: 3)},
@@ -393,16 +395,17 @@ class _CardsScreenState extends State<CardsScreen> {
       {'label': '3 أيام', 'duration': const Duration(days: 3)},
       {'label': 'أسبوع', 'duration': const Duration(days: 7)},
       {'label': '15 يوم', 'duration': const Duration(days: 15)},
-      {'label': '30 يوم', 'duration': const Duration(days: 30)}, // تمت الإضافة ✅
+      {'label': '30 يوم', 'duration': const Duration(days: 30)},
     ];
 
     // 3. إنشاء المهام في الطابور
+    int successCount = 0;
     for (var interval in intervals) {
       final scheduledTime = now.add(interval['duration'] as Duration);
       try {
         await databases.createDocument(
           databaseId: dbId,
-          collectionId: colQueue, // تأكد أن ID صحيح
+          collectionId: colQueue, // تأكد أن هذا المتغير فيه ID الصحيح: 674...
           documentId: ID.unique(),
           data: {
             'userId': userId,
@@ -412,11 +415,12 @@ class _CardsScreenState extends State<CardsScreen> {
             'scheduledAt': scheduledTime.toIso8601String(),
           }
         );
+        successCount++;
       } catch (e) {
         print("Error scheduling ${interval['label']}: $e");
       }
     }
-    print("✅ Notifications scheduled successfully.");
+    print("✅ تم جدولة $successCount إشعارات بنجاح في الطابور.");
   }
   // ==============================================================
 
